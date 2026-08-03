@@ -95,9 +95,10 @@ async function callModel(prompt, images, model) {
 }
 
 /** Calls the Gemini Edge Function — for real audio/video file understanding.
- *  Pass a storagePath (from uploadFile) instead of raw file data, so large
- *  files never have to travel through a single request body. */
-async function callGemini(prompt, storagePath, mimeType) {
+ *  Pass an array of files: [{ storagePath, mimeType }, ...] — one file for
+ *  a single upload, multiple files when comparing several at once
+ *  (e.g. two videos side by side). */
+async function callGemini(prompt, files) {
   const { data: sessionData } = await supabaseClient.auth.getSession();
   const token = sessionData?.session?.access_token;
 
@@ -108,13 +109,12 @@ async function callGemini(prompt, storagePath, mimeType) {
       Authorization: `Bearer ${token}`,
       apikey: SUPABASE_ANON_KEY,
     },
-    body: JSON.stringify({ prompt, storagePath, mimeType }),
+    body: JSON.stringify({ prompt, files }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   return data.result;
 }
-
 /** Uploads a file straight to Supabase Storage (handles large files natively,
  *  no size ceiling from stuffing everything into one JSON request). Returns
  *  the storage path to pass into callGemini. */
