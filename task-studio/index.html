@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Task Studio</title>
+<link rel="icon" href="../assets/logo-mark.svg" type="image/svg+xml">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../shared/brand.css">
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<div class="ts-wrap">
+
+  <div class="ts-topbar">
+    <div>
+      <img src="../assets/logo-mark.svg" height="30" alt="Task Studio" style="border-radius:7px;margin-bottom:6px;">
+      <p style="color:var(--brand-muted);font-size:13px;margin:0;">One tab per task, each with its own tailored prompt.</p>
+    </div>
+    <div class="who">
+      <span id="whoEmail"></span>
+      <a id="adminLink" href="admin.html" style="display:none;">Admin</a>
+      <a id="logoutLink" href="#">Log out</a>
+    </div>
+  </div>
+
+  <div class="ts-pipeline" id="pipeline">
+    <div class="step" data-step="0"><span class="dot"></span>Prompt loaded</div>
+    <span class="arrow">→</span>
+    <div class="step" data-step="1"><span class="dot"></span>Model called</div>
+    <span class="arrow">→</span>
+    <div class="step" data-step="2"><span class="dot"></span>Result</div>
+  </div>
+
+  <div class="ts-tabs" id="tabsBar"></div>
+  <div id="panelHost"></div>
+
+</div>
+
+<script src="../shared/auth.js"></script>
+<script>
+let tasks = [];
+let activeIndex = 0;
+
+async function init(){
+  const user = await requireLogin("../login.html");
+  if(!user) return;
+  document.getElementById('whoEmail').textContent = user.email;
+  document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+    e.preventDefault();
+    await signOut();
+    window.location.href = "../login.html";
+  });
+  if(await isAdmin()){
+    document.getElementById('adminLink').style.display = 'inline';
+  }
+
+  const { data, error } = await supabaseClient
+    .from('tasks')
+    .select('*')
+    .order('sort_order', { ascending: true });
+
+  if(error){
+    document.getElementById('panelHost').textContent = "Couldn't load tasks: " + error.message;
+    return;
+  }
+  tasks = data;
+  renderTabs();
+  renderPanel(0);
+}
+
+function renderTabs(){
+  const bar = document.getElementById('tabsBar');
+  bar.innerHTML = '';
+  tasks.forEach((t, i)=>{
+    const tab = document.createElement('div');
+    tab.className = 'ts-tab' + (i===activeIndex ? ' active' : '');
+    tab.textContent = t.label;
+    tab.addEventListener('click', ()=>{ activeIndex = i; renderTabs(); renderPanel(i); });
+    bar.appendChild(tab);
+  });
+}
+
+function resetPipeline(){
+  document.querySelectorAll('.ts-pipeline .step').forEach(s=>s.classList.remove('active','done'));
+}
+function setPipeline(stage){
+  document.querySelectorAll('.ts-pipeline .step').forEach((s,i)=>{
+    s.classList.remove('active','done');
+    if(i<stage) s.classList.add('done');
+    if(i===stage) s.classList.add('active');
+  });
+}
+function finishPipeline(){
+  document.querySelectorAll('.ts-pipeline .step').forEach(s=>{ s.classList.remove('active'); s.classList.add('done'); });
+}
+
+function renderPanel(i){
+  resetPipeline();
+  const task = tasks[i];
+  const host = document.getElementById('panelHost');
+  host.innerHTML = `
+    <div class="brand-card">
+      <h2 style="font-size:15px;margin:0 0 4px;">${task.label}</h2>
+      <p class="ts-desc">${task.description || ''}</p>
+      <div class="ts-prompt"><span class="label">Tailored instructions for this tab</span>${task.prompt}</div>
+      <div id="taskBody"></div>
+    </div>
+  `;
+  const body = document.getElementById('taskBody');
+
+  if(task.input_type === 'audio'){
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+        <button class="brand-btn" id="micBtn">Start recording</button>
+        <span id="micStatus" style="font-size:12px;color:var(--brand-muted);"></span>
+      </div>
+      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
+    `;
+    setupAudio(task);
+  } else if(task.input_type === 'image'){
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+        <input type="file" id="fileInput" accept="image/*">
+        <button class="brand-btn" id="runBtn" disabled>Run</button>
+      </div>
+      <img id="thumb" class="ts-thumb" style="display:none;">
+      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
+    `;
+    setupImage(task);
+  } else if(task.input_type === 'video'){
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+        <input type="file" id="fileInput" accept="video/*">
+        <button class="brand-btn" id="runBtn" disabled>Extract frames &amp; run</button>
+      </div>
+      <div class="ts-thumbrow" id="frameThumbs"></div>
+      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
+      <video id="hiddenVideo" style="display:none;"></video>
+      <canvas id="hiddenCanvas" style="display:none;"></canvas>
+    `;
+    setupVideo(task);
+  } else {
+    body.innerHTML = `<p style="color:var(--brand-muted);">Unknown input type: ${task.input_type}</p>`;
+  }
+}
+
+function setupAudio(task){
+  const micBtn = document.getElementById('micBtn');
+  const micStatus = document.getElementById('micStatus');
+  const out = document.getElementById('taskOut');
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SpeechRec){
+    micBtn.disabled = true;
+    micStatus.textContent = "Your browser doesn't support live speech recognition (try Chrome).";
+    return;
+  }
+  const recognition = new SpeechRec();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = "en-US";
+  let recognizing = false;
+
+  recognition.onresult = (e)=>{
+    let finalText = "";
+    for(let i=0;i<e.results.length;i++) finalText += e.results[i][0].transcript + " ";
+    out.classList.remove('empty');
+    out.innerHTML = '<span class="ts-tag">live transcript</span>\n' + finalText;
+  };
+  recognition.onstart = ()=>{ setPipeline(1); micStatus.innerHTML = '<span class="live-dot"></span>Listening…'; };
+  recognition.onend = ()=>{
+    recognizing = false; micBtn.textContent = "Start recording"; micStatus.textContent = "Stopped."; finishPipeline();
+  };
+  micBtn.addEventListener('click', ()=>{
+    if(!recognizing){ setPipeline(0); recognizing = true; micBtn.textContent = "Stop recording"; recognition.start(); }
+    else recognition.stop();
+  });
+}
+
+function setupImage(task){
+  const fileInput = document.getElementById('fileInput');
+  const runBtn = document.getElementById('runBtn');
+  const thumb = document.getElementById('thumb');
+  const out = document.getElementById('taskOut');
+  let b64 = null;
+
+  fileInput.addEventListener('change', ()=>{
+    const file = fileInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      b64 = reader.result.split(',')[1];
+      thumb.src = reader.result;
+      thumb.style.display = 'block';
+      runBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  runBtn.addEventListener('click', async ()=>{
+    runBtn.disabled = true;
+    runBtn.textContent = "Working…";
+    setPipeline(0);
+    out.classList.add('empty');
+    out.textContent = "Working…";
+    try{
+      setPipeline(1);
+      const result = await callModel(task.prompt, [b64], task.model);
+      setPipeline(2);
+      out.classList.remove('empty');
+      out.innerHTML = '<span class="ts-tag">result</span>\n' + result;
+    } catch(err){
+      out.textContent = "Error: " + err.message;
+    } finally {
+      finishPipeline();
+      runBtn.disabled = false;
+      runBtn.textContent = "Run";
+    }
+  });
+}
+
+function setupVideo(task){
+  const fileInput = document.getElementById('fileInput');
+  const runBtn = document.getElementById('runBtn');
+  const thumbs = document.getElementById('frameThumbs');
+  const out = document.getElementById('taskOut');
+  const hiddenVideo = document.getElementById('hiddenVideo');
+  const hiddenCanvas = document.getElementById('hiddenCanvas');
+
+  fileInput.addEventListener('change', ()=>{
+    const file = fileInput.files[0];
+    if(!file) return;
+    hiddenVideo.src = URL.createObjectURL(file);
+    runBtn.disabled = false;
+    thumbs.innerHTML = '';
+    out.classList.add('empty');
+    out.textContent = 'Result will appear here.';
+  });
+
+  function grabFrameAt(time){
+    return new Promise((resolve)=>{
+      function onSeeked(){
+        hiddenVideo.removeEventListener('seeked', onSeeked);
+        hiddenCanvas.width = hiddenVideo.videoWidth;
+        hiddenCanvas.height = hiddenVideo.videoHeight;
+        hiddenCanvas.getContext('2d').drawImage(hiddenVideo, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
+        resolve(hiddenCanvas.toDataURL('image/jpeg', 0.8));
+      }
+      hiddenVideo.addEventListener('seeked', onSeeked);
+      hiddenVideo.currentTime = time;
+    });
+  }
+
+  runBtn.addEventListener('click', async ()=>{
+    runBtn.disabled = true;
+    runBtn.textContent = "Extracting frames…";
+    setPipeline(0);
+    thumbs.innerHTML = '';
+    out.classList.add('empty');
+    out.textContent = "Working…";
+    try{
+      await new Promise(res=>{
+        if(hiddenVideo.readyState >= 1) res();
+        else hiddenVideo.addEventListener('loadedmetadata', res, {once:true});
+      });
+      const duration = hiddenVideo.duration || 1;
+      const times = [duration*0.05, duration*0.5, duration*0.95];
+      const frames = [];
+      for(const t of times){
+        const dataUrl = await grabFrameAt(t);
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        thumbs.appendChild(img);
+        frames.push(dataUrl.split(',')[1]);
+      }
+      runBtn.textContent = "Evaluating…";
+      setPipeline(1);
+      const result = await callModel(task.prompt, frames, task.model);
+      setPipeline(2);
+      out.classList.remove('empty');
+      out.innerHTML = '<span class="ts-tag">result</span>\n' + result;
+    } catch(err){
+      out.textContent = "Error: " + err.message;
+    } finally {
+      finishPipeline();
+      runBtn.disabled = false;
+      runBtn.textContent = "Extract frames & run";
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>

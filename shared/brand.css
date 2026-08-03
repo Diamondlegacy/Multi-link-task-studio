@@ -1,0 +1,69 @@
+/* ==============================================================
+   BRAND.CSS — swap these values to match your multi-link site
+   exactly. Everything else in Task Studio reads from these
+   variables, so changing colors here updates the whole app.
+   ============================================================== */
+
+:root{
+  /* ---- replace with your multi-link site's real palette ---- */
+  --brand-bg:        #101316;   /* page background */
+  --brand-surface:   #181C21;   /* cards / panels */
+  --brand-surface-2: #1F242B;   /* nested panels, inputs */
+  --brand-line:      #2A3038;   /* borders */
+  --brand-text:      #EDEAE2;   /* primary text */
+  --brand-muted:     #8B92A0;   /* secondary text */
+  --brand-accent:    #45C4B0;   /* links, active states */
+  --brand-accent-2:  #F0A857;   /* buttons, highlights */
+  --brand-danger:    #E15A5A;
+
+  /* ---- replace with your multi-link site's real fonts ---- */
+  --brand-font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --brand-font-mono:    ui-monospace, "SF Mono", Menlo, monospace;
+
+  --brand-radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body{
+  margin:0;
+  background:var(--brand-bg);
+  color:var(--brand-text);
+  font-family:var(--brand-font-display);
+}
+
+a{ color:var(--brand-accent); }
+
+.brand-btn{
+  background:var(--brand-accent-2);
+  color:#1A1305;
+  border:none;
+  border-radius:7px;
+  padding:10px 18px;
+  font-size:13px;
+  font-weight:650;
+  cursor:pointer;
+  transition:opacity .2s ease, transform .1s ease;
+}
+.brand-btn:hover{ opacity:.9; }
+.brand-btn:active{ transform:scale(.97); }
+.brand-btn:disabled{ background:var(--brand-line); color:var(--brand-muted); cursor:not-allowed; }
+.brand-btn.secondary{ background:transparent; border:1px solid var(--brand-line); color:var(--brand-text); }
+
+.brand-input{
+  background:var(--brand-surface-2);
+  border:1px solid var(--brand-line);
+  color:var(--brand-text);
+  border-radius:7px;
+  padding:10px 12px;
+  font-size:13px;
+  width:100%;
+}
+.brand-input:focus{ outline:2px solid var(--brand-accent); outline-offset:1px; }
+
+.brand-card{
+  background:var(--brand-surface);
+  border:1px solid var(--brand-line);
+  border-radius:var(--brand-radius);
+  padding:24px;
+}
