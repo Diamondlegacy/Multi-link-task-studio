@@ -40,6 +40,7 @@
 <script>
 let tasks = [];
 let activeIndex = 0;
+let userIsAdmin = false;
 
 async function init(){
   const user = await requireLogin("../login.html");
@@ -52,6 +53,7 @@ async function init(){
   });
   if(await isAdmin()){
     document.getElementById('adminLink').style.display = 'inline';
+    userIsAdmin = true;
   }
 
   const { data, error } = await supabaseClient
@@ -96,13 +98,16 @@ function finishPipeline(){
 
 function renderPanel(i){
   resetPipeline();
-  const task = tasks[i];
+ const task = tasks[i];
   const host = document.getElementById('panelHost');
+  const promptBlock = userIsAdmin
+    ? `<div class="ts-prompt"><span class="label">Tailored instructions for this tab</span>${task.prompt}</div>`
+    : '';
   host.innerHTML = `
     <div class="brand-card">
       <h2 style="font-size:15px;margin:0 0 4px;">${task.label}</h2>
       <p class="ts-desc">${task.description || ''}</p>
-      <div class="ts-prompt"><span class="label">Tailored instructions for this tab</span>${task.prompt}</div>
+      ${promptBlock}
       <div id="taskBody"></div>
     </div>
   `;
