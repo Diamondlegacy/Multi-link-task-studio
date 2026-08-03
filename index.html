@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Studio</title>
+<link rel="stylesheet" href="shared/brand.css">
+<style>
+  .hero{
+    max-width:920px; margin:0 auto; padding:90px 20px 40px;
+  }
+  .kicker{
+    font-family:var(--brand-font-mono); font-size:11px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--brand-accent); margin-bottom:18px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .kicker::before{ content:''; width:6px; height:6px; border-radius:50%; background:var(--brand-accent); }
+  h1{
+    font-size:44px; line-height:1.08; letter-spacing:-.02em; margin:0 0 18px; font-weight:700;
+    max-width:680px;
+  }
+  h1 span{ color:var(--brand-accent-2); }
+  .lede{
+    font-size:16px; line-height:1.6; color:var(--brand-muted); max-width:520px; margin:0 0 32px;
+  }
+  .cta-row{ display:flex; gap:12px; align-items:center; margin-bottom:70px; }
+  .cta-row a{ text-decoration:none; }
+  .cta-secondary{ font-size:13px; color:var(--brand-muted); }
+
+  /* signature: live pipeline strip, animated on load */
+  .pipeline-demo{
+    display:flex; align-items:center; gap:0; margin-bottom:80px;
+    font-family:var(--brand-font-mono); font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--brand-muted); flex-wrap:wrap;
+  }
+  .pipeline-demo .step{
+    display:flex; align-items:center; gap:8px; padding:8px 14px;
+    border:1px solid var(--brand-line); border-radius:20px; background:var(--brand-surface);
+  }
+  .pipeline-demo .step .dot{ width:6px; height:6px; border-radius:50%; background:var(--brand-line); }
+  .pipeline-demo .arrow{ color:var(--brand-line); padding:0 6px; }
+  .pipeline-demo .step.lit{ color:#101316; background:var(--brand-accent); border-color:var(--brand-accent); }
+  .pipeline-demo .step.lit .dot{ background:#101316; }
+
+  .section-label{
+    font-family:var(--brand-font-mono); font-size:11px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--brand-muted); margin-bottom:20px;
+  }
+  .task-grid{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:16px; margin-bottom:80px;
+  }
+  .task-card{
+    border:1px solid var(--brand-line); border-radius:var(--brand-radius); padding:22px;
+    background:var(--brand-surface); transition:border-color .2s ease;
+  }
+  .task-card:hover{ border-color:var(--brand-accent); }
+  .task-card .tag{
+    font-family:var(--brand-font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--brand-accent); border:1px solid var(--brand-accent); border-radius:4px; padding:1px 6px;
+    display:inline-block; margin-bottom:12px;
+  }
+  .task-card h3{ font-size:15px; margin:0 0 8px; }
+  .task-card p{ font-size:13px; color:var(--brand-muted); line-height:1.55; margin:0; }
+
+  footer{ max-width:920px; margin:0 auto; padding:30px 20px 50px; border-top:1px solid var(--brand-line);
+    font-size:12px; color:var(--brand-muted); display:flex; justify-content:space-between; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="kicker">Task Studio</div>
+  <h1>One tailored prompt <span>per task.</span><br>Fast, focused answers, not a chatbot.</h1>
+  <p class="lede">Each tab is purpose-built for one job — upload the right thing, get a fast, specific result. No generic back-and-forth.</p>
+  <div class="cta-row">
+    <a href="login.html"><button class="brand-btn">Get started</button></a>
+    <span class="cta-secondary">Free to sign up</span>
+  </div>
+
+  <div class="pipeline-demo" id="pipelineDemo">
+    <div class="step" data-i="0"><span class="dot"></span>Prompt loaded</div>
+    <span class="arrow">→</span>
+    <div class="step" data-i="1"><span class="dot"></span>Model called</div>
+    <span class="arrow">→</span>
+    <div class="step" data-i="2"><span class="dot"></span>Result</div>
+  </div>
+
+  <div class="section-label">Available tasks</div>
+  <div class="task-grid">
+    <div class="task-card">
+      <span class="tag">Live · Mic</span>
+      <h3>Audio Transcription</h3>
+      <p>Speak, and get an exact transcript back in real time.</p>
+    </div>
+    <div class="task-card">
+      <span class="tag">Upload · Image</span>
+      <h3>Map Rating</h3>
+      <p>Upload a map and get it scored on accuracy, clarity, and completeness.</p>
+    </div>
+    <div class="task-card">
+      <span class="tag">Upload · Video</span>
+      <h3>Video Quality Eval</h3>
+      <p>Sampled frames are evaluated for visual quality and consistency.</p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span>Task Studio</span>
+  <span>New tasks added regularly</span>
+</footer>
+
+<script>
+  // gentle looping highlight across the pipeline strip — purely decorative
+  let i = 0;
+  const steps = document.querySelectorAll('#pipelineDemo .step');
+  setInterval(()=>{
+    steps.forEach(s=>s.classList.remove('lit'));
+    steps[i].classList.add('lit');
+    i = (i+1) % steps.length;
+  }, 1100);
+</script>
+
+</body>
+</html>
