@@ -1,0 +1,28 @@
+<svg viewBox="0 0 320 96" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#45C4B0"/>
+      <stop offset="100%" stop-color="#F0A857"/>
+    </linearGradient>
+  </defs>
+
+  <!-- icon -->
+  <g transform="translate(6,6)">
+    <rect width="84" height="84" rx="18" fill="#101316"/>
+    <polygon
+      points="10,10 24,10 42,37 60,10 74,10 74,74 60,74 60,30 42,56 24,30 24,74 10,74"
+      fill="url(#mGrad)"
+      transform="scale(0.95) translate(3,3)"/>
+    <circle cx="42" cy="56" r="6.5" fill="#F0A857" stroke="#101316" stroke-width="2.5"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="106" y="46" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+        font-size="30" font-weight="700" letter-spacing="-0.5" fill="#EDEAE2">
+    Task<tspan fill="#F0A857">Studio</tspan>
+  </text>
+  <text x="107" y="66" font-family="ui-monospace,'SF Mono',Menlo,monospace"
+        font-size="11" letter-spacing="2" fill="#8B92A0">
+    ONE PROMPT PER TASK
+  </text>
+</svg>

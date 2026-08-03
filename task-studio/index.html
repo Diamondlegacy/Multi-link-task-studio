@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Task Studio</title>
+<link rel="icon" href="../assets/logo-mark.svg" type="image/svg+xml">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../shared/brand.css">
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<div class="ts-wrap">
+
+  <div class="ts-topbar">
+    <div>
+      <img src="../assets/logo-mark.svg" height="30" alt="Task Studio" style="border-radius:7px;margin-bottom:6px;">
+      <p style="color:var(--brand-muted);font-size:13px;margin:0;">One tab per task, each with its own tailored prompt.</p>
+    </div>
+    <div class="who">
+      <span id="whoEmail"></span>
+      <a id="adminLink" href="admin.html" style="display:none;">Admin</a>
+      <a id="logoutLink" href="#">Log out</a>
+    </div>
+  </div>
+
+  <div class="ts-pipeline" id="pipeline">
+    <div class="step" data-step="0"><span class="dot"></span>Prompt loaded</div>
+    <span class="arrow">→</span>
+    <div class="step" data-step="1"><span class="dot"></span>Model called</div>
+    <span class="arrow">→</span>
+    <div class="step" data-step="2"><span class="dot"></span>Result</div>
+  </div>
+
+  <div class="ts-tabs" id="tabsBar"></div>
+  <div id="panelHost"></div>
+
+</div>
+
+<script src="../shared/auth.js"></script>
+<script>
+let tasks = [];
+let activeIndex = 0;
+
+async function init(){
+  const user = await requireLogin("../login.html");
+  if(!user) return;
+  document.getElementById('whoEmail').textContent = user.email;
+  document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+    e.preventDefault();
+    await signOut();
+    window.location.href = "../login.html";
+  });
+  if(await isAdmin()){
+    document.getElementById('adminLink').style.display = 'inline';
+  }
+
+  const { data, error } = await supabaseClient
+    .from('tasks')
+    .select('*')
+    .order('sort_order', { ascending: true });
+
+  if(error){
+    document.getElementById('panelHost').textContent = "Couldn't load tasks: " + error.message;
+    return;
+  }
+  tasks = data;
+  renderTabs();
+  renderPanel(0);
+}
+
+function renderTabs(){
+  const bar = document.getElementById('tabsBar');
+  bar.innerHTML = '';
+  tasks.forEach((t, i)=>{
+    const tab = document.createElement('div');
+    tab.className = 'ts-tab' + (i===activeIndex ? ' active' : '');
+    tab.textContent = t.label;
+    tab.addEventListener('click', ()=>{ activeIndex = i; renderTabs(); renderPanel(i); });
+    bar.appendChild(tab);
+  });
+}
+
+function resetPipeline(){
+  document.querySelectorAll('.ts-pipeline .step').forEach(s=>s.classList.remove('active','done'));
+}
+function setPipeline(stage){
+  document.querySelectorAll('.ts-pipeline .step').forEach((s,i)=>{
+    s.classList.remove('active','done');
+    if(i<stage) s.classList.add('done');
+    if(i===stage) s.classList.add('active');
+  });
+}
+function finishPipeline(){
+  document.querySelectorAll('.ts-pipeline .step').forEach(s=>{ s.classList.remove('active'); s.classList.add('done'); });
+}
+
+function renderPanel(i){
+  resetPipeline();
+  const task = tasks[i];
+  const host = document.getElementById('panelHost');
+  host.innerHTML = `
+    <div class="brand-card">
+      <h2 style="font-size:15px;margin:0 0 4px;">${task.label}</h2>
+      <p class="ts-desc">${task.description || ''}</p>
+      <div class="ts-prompt"><span class="label">Tailored instructions for this tab</span>${task.prompt}</div>
+      <div id="taskBody"></div>
+    </div>
+  `;
+  const body = document.getElementById('taskBody');
+
+  if(task.input_type === 'audio'){
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+        <input type="file" id="fileInput" accept="audio/*">
+        <button class="brand-btn" id="runBtn" disabled>Transcribe</button>
+      </div>
+      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
+    `;
+    setupAudio(task);
+  } else if(task.input_type === 'image'){
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+        <input type="file" id="fileInput" accept="image/*">
+        <button class="brand-btn" id="runBtn" disabled>Run</button>
+      </div>
+      <img id="thumb" class="ts-thumb" style="display:none;">
+      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
+    `;
+    setupImage(task);
+  } else if(task.input_type === 'video'){
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+        <input type="file" id="fileInput" accept="video/*">
+        <button class="brand-btn" id="runBtn" disabled>Evaluate video</button>
+      </div>
+      <video id="videoPreview" style="max-width:220px;border-radius:8px;border:1px solid var(--brand-line);display:none;margin-bottom:10px;" controls></video>
+      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
+    `;
+    setupVideo(task);
+  } else {
+    body.innerHTML = `<p style="color:var(--brand-muted);">Unknown input type: ${task.input_type}</p>`;
+  }
+}
+
+function setupAudio(task){
+  const fileInput = document.getElementById('fileInput');
+  const runBtn = document.getElementById('runBtn');
+  const out = document.getElementById('taskOut');
+  let selectedFile = null;
+
+  fileInput.addEventListener('change', ()=>{
+    selectedFile = fileInput.files[0];
+    if(selectedFile) runBtn.disabled = false;
+  });
+
+  runBtn.addEventListener('click', async ()=>{
+    runBtn.disabled = true;
+    runBtn.textContent = "Uploading…";
+    setPipeline(0);
+    out.classList.add('empty');
+    out.textContent = "Uploading file…";
+    try{
+      const path = await uploadFile(selectedFile);
+      runBtn.textContent = "Transcribing…";
+      out.textContent = "Working…";
+      setPipeline(1);
+      const result = await callGemini(task.prompt, path, selectedFile.type || 'audio/mpeg');
+      setPipeline(2);
+      out.classList.remove('empty');
+      out.innerHTML = '<span class="ts-tag">transcript</span>\n' + result;
+    } catch(err){
+      out.textContent = "Error: " + err.message;
+    } finally {
+      finishPipeline();
+      runBtn.disabled = false;
+      runBtn.textContent = "Transcribe";
+    }
+  });
+}
+
+function setupImage(task){
+  const fileInput = document.getElementById('fileInput');
+  const runBtn = document.getElementById('runBtn');
+  const thumb = document.getElementById('thumb');
+  const out = document.getElementById('taskOut');
+  let b64 = null;
+
+  fileInput.addEventListener('change', ()=>{
+    const file = fileInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      b64 = reader.result.split(',')[1];
+      thumb.src = reader.result;
+      thumb.style.display = 'block';
+      runBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  runBtn.addEventListener('click', async ()=>{
+    runBtn.disabled = true;
+    runBtn.textContent = "Working…";
+    setPipeline(0);
+    out.classList.add('empty');
+    out.textContent = "Working…";
+    try{
+      setPipeline(1);
+      const result = await callModel(task.prompt, [b64], task.model);
+      setPipeline(2);
+      out.classList.remove('empty');
+      out.innerHTML = '<span class="ts-tag">result</span>\n' + result;
+    } catch(err){
+      out.textContent = "Error: " + err.message;
+    } finally {
+      finishPipeline();
+      runBtn.disabled = false;
+      runBtn.textContent = "Run";
+    }
+  });
+}
+
+function setupVideo(task){
+  const fileInput = document.getElementById('fileInput');
+  const runBtn = document.getElementById('runBtn');
+  const preview = document.getElementById('videoPreview');
+  const out = document.getElementById('taskOut');
+  let selectedFile = null;
+
+  fileInput.addEventListener('change', ()=>{
+    selectedFile = fileInput.files[0];
+    if(!selectedFile) return;
+    preview.src = URL.createObjectURL(selectedFile);
+    preview.style.display = 'block';
+    out.classList.add('empty');
+    out.textContent = 'Result will appear here.';
+    runBtn.disabled = false;
+  });
+
+  runBtn.addEventListener('click', async ()=>{
+    runBtn.disabled = true;
+    runBtn.textContent = "Uploading…";
+    setPipeline(0);
+    out.classList.add('empty');
+    out.textContent = "Uploading file…";
+    try{
+      const path = await uploadFile(selectedFile);
+      runBtn.textContent = "Evaluating…";
+      out.textContent = "Working…";
+      setPipeline(1);
+      const result = await callGemini(task.prompt, path, selectedFile.type || 'video/mp4');
+      setPipeline(2);
+      out.classList.remove('empty');
+      out.innerHTML = '<span class="ts-tag">evaluation</span>\n' + result;
+    } catch(err){
+      out.textContent = "Error: " + err.message;
+    } finally {
+      finishPipeline();
+      runBtn.disabled = false;
+      runBtn.textContent = "Evaluate video";
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
