@@ -11,8 +11,8 @@
       task-studio/index.html, task-studio/admin.html
    ============================================================== */
 
-const SUPABASE_URL = "YOUR_SUPABASE_PROJECT_URL";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL = "https://amvhlpdentyhujfxehhp.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "sb_publishable_yaRoUOJxI3NhiLkNRQsHqQ_qdRh8373";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
