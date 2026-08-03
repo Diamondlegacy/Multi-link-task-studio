@@ -1,27 +1,3 @@
-// ==============================================================
-// call-gemini — Supabase Edge Function
-//
-// Handles AUDIO and VIDEO tasks with real, full-length files.
-//
-// How large files work here:
-//   1. The browser uploads the file straight to Supabase Storage
-//      (handles big files natively, no request-body ceiling).
-//   2. This function downloads it server-side, then uploads it to
-//      Gemini's own Files API (supports files up to ~2GB).
-//   3. Once Gemini finishes processing it, we ask it to run your
-//      task's prompt against the file.
-//
-// SETUP:
-//   1. Get a free Gemini key: https://aistudio.google.com/app/apikey
-//   2. Get your Supabase "service_role" secret key (Project Settings
-//      → API Keys → Legacy API Keys tab, or the new secret key —
-//      NEVER put this one in any browser-facing file, only here)
-//   3. Deploy:  supabase functions deploy call-gemini
-//   4. Set secrets:
-//        supabase secrets set GEMINI_API_KEY=your_gemini_key
-//        supabase secrets set SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-// ==============================================================
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -47,83 +23,76 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, storagePath, mimeType } = await req.json();
-    if (!storagePath) throw new Error("No file path was sent.");
+    const { prompt, files } = await req.json();
+    if (!files || !files.length) throw new Error("No files were sent.");
 
-    // 1. Pull the file down from Supabase Storage
-    const { data: fileBlob, error: dlError } = await supabaseAdmin
-      .storage
-      .from("task-uploads")
-      .download(storagePath);
-    if (dlError) throw new Error("Couldn't read uploaded file: " + dlError.message);
+    const fileParts = [];
 
-    const fileBuffer = new Uint8Array(await fileBlob.arrayBuffer());
+    for (const f of files) {
+      const { data: fileBlob, error: dlError } = await supabaseAdmin
+        .storage
+        .from("task-uploads")
+        .download(f.storagePath);
+      if (dlError) throw new Error("Couldn't read uploaded file: " + dlError.message);
 
-    // 2. Start a resumable upload to Gemini's Files API
-    const startRes = await fetch(
-      `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
-      {
+      const fileBuffer = new Uint8Array(await fileBlob.arrayBuffer());
+
+      const startRes = await fetch(
+        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: {
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": String(fileBuffer.byteLength),
+            "X-Goog-Upload-Header-Content-Type": f.mimeType,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ file: { display_name: f.storagePath } }),
+        }
+      );
+      const uploadUrl = startRes.headers.get("x-goog-upload-url");
+      if (!uploadUrl) throw new Error("Gemini didn't return an upload URL.");
+
+      const uploadRes = await fetch(uploadUrl, {
         method: "POST",
         headers: {
-          "X-Goog-Upload-Protocol": "resumable",
-          "X-Goog-Upload-Command": "start",
-          "X-Goog-Upload-Header-Content-Length": String(fileBuffer.byteLength),
-          "X-Goog-Upload-Header-Content-Type": mimeType,
-          "Content-Type": "application/json",
+          "Content-Length": String(fileBuffer.byteLength),
+          "X-Goog-Upload-Offset": "0",
+          "X-Goog-Upload-Command": "upload, finalize",
         },
-        body: JSON.stringify({ file: { display_name: storagePath } }),
+        body: fileBuffer,
+      });
+      const uploadedFile = await uploadRes.json();
+      if (uploadedFile.error) throw new Error(uploadedFile.error.message);
+
+      let fileInfo = uploadedFile.file;
+
+      let attempts = 0;
+      while (fileInfo.state === "PROCESSING" && attempts < 30) {
+        await sleep(2000);
+        const checkRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${GEMINI_API_KEY}`
+        );
+        fileInfo = await checkRes.json();
+        attempts++;
       }
-    );
-    const uploadUrl = startRes.headers.get("x-goog-upload-url");
-    if (!uploadUrl) throw new Error("Gemini didn't return an upload URL.");
+      if (fileInfo.state !== "ACTIVE") {
+        throw new Error("Gemini is still processing one of the files — try again in a moment.");
+      }
 
-    // 3. Send the actual bytes
-    const uploadRes = await fetch(uploadUrl, {
-      method: "POST",
-      headers: {
-        "Content-Length": String(fileBuffer.byteLength),
-        "X-Goog-Upload-Offset": "0",
-        "X-Goog-Upload-Command": "upload, finalize",
-      },
-      body: fileBuffer,
-    });
-    const uploadedFile = await uploadRes.json();
-    if (uploadedFile.error) throw new Error(uploadedFile.error.message);
+      fileParts.push({ file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri } });
 
-    let fileInfo = uploadedFile.file;
-
-    // 4. Wait until Gemini finishes processing the file
-    let attempts = 0;
-    while (fileInfo.state === "PROCESSING" && attempts < 30) {
-      await sleep(2000);
-      const checkRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${GEMINI_API_KEY}`
-      );
-      fileInfo = await checkRes.json();
-      attempts++;
-    }
-    if (fileInfo.state !== "ACTIVE") {
-      throw new Error("Gemini is still processing this file — try again in a moment.");
+      supabaseAdmin.storage.from("task-uploads").remove([f.storagePath]).catch(() => {});
     }
 
-    // 5. Clean up the copy in our own storage now that Gemini has it
-    supabaseAdmin.storage.from("task-uploads").remove([storagePath]).catch(() => {});
-
-    // 6. Ask Gemini to run the task's prompt against the file
     const genRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri } },
-                { text: prompt },
-              ],
-            },
-          ],
+          contents: [{ parts: [...fileParts, { text: prompt }] }],
         }),
       }
     );
