@@ -154,7 +154,7 @@ function setupMedia(task){
     runBtn.disabled = selectedFiles.length === 0;
   });
 
-  runBtn.addEventListener('click', async ()=>{
+ runBtn.addEventListener('click', async ()=>{
     runBtn.disabled = true;
     runBtn.textContent = "Uploading…";
     setPipeline(0);
@@ -165,10 +165,13 @@ function setupMedia(task){
       for(const file of selectedFiles){
         paths.push(await uploadFile(file));
       }
-      runBtn.textContent = "Running…";
-      out.textContent = "Working…";
+      runBtn.textContent = "Working…";
+      out.textContent = "Starting…";
       setPipeline(1);
-      const result = await callGemini(task.id, paths);
+      const jobId = await callGemini(task.id, paths);
+      const result = await waitForJob(jobId, (status)=>{
+        out.textContent = status === 'processing' ? "Processing… this can take a bit for larger files." : "Queued…";
+      });
       setPipeline(2);
       out.classList.remove('empty');
       out.innerHTML = '<span class="ts-tag">result</span>\n' + result;
