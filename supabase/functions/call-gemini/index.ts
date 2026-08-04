@@ -12,6 +12,63 @@ async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function uploadOneFile(storagePath) {
+  const { data: fileBlob, error: dlError } = await supabaseAdmin
+    .storage
+    .from("task-uploads")
+    .download(storagePath);
+  if (dlError) throw new Error("Couldn't read uploaded file: " + dlError.message);
+
+  const fileBuffer = new Uint8Array(await fileBlob.arrayBuffer());
+  const mimeType = fileBlob.type || "application/octet-stream";
+
+  const startRes = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(fileBuffer.byteLength),
+        "X-Goog-Upload-Header-Content-Type": mimeType,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { display_name: storagePath } }),
+    }
+  );
+  const uploadUrl = startRes.headers.get("x-goog-upload-url");
+  if (!uploadUrl) throw new Error("Gemini didn't return an upload URL.");
+
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Length": String(fileBuffer.byteLength),
+      "X-Goog-Upload-Offset": "0",
+      "X-Goog-Upload-Command": "upload, finalize",
+    },
+    body: fileBuffer,
+  });
+  const uploadedFile = await uploadRes.json();
+  if (uploadedFile.error) throw new Error(uploadedFile.error.message);
+
+  let fileInfo = uploadedFile.file;
+  let attempts = 0;
+  while (fileInfo.state === "PROCESSING" && attempts < 20) {
+    await sleep(1500);
+    const checkRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${GEMINI_API_KEY}`
+    );
+    fileInfo = await checkRes.json();
+    attempts++;
+  }
+  if (fileInfo.state !== "ACTIVE") {
+    throw new Error("Gemini is still processing " + storagePath + " — try again shortly.");
+  }
+
+  supabaseAdmin.storage.from("task-uploads").remove([storagePath]).catch(() => {});
+  return { file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri } };
+}
+
 serve(async (req) => {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -34,66 +91,9 @@ serve(async (req) => {
       .single();
     if (taskError || !task) throw new Error("Unknown task.");
 
-    const fileParts = [];
-
-    for (const storagePath of storagePaths) {
-      const { data: fileBlob, error: dlError } = await supabaseAdmin
-        .storage
-        .from("task-uploads")
-        .download(storagePath);
-      if (dlError) throw new Error("Couldn't read uploaded file: " + dlError.message);
-
-      const fileBuffer = new Uint8Array(await fileBlob.arrayBuffer());
-      const mimeType = fileBlob.type || "application/octet-stream";
-
-      const startRes = await fetch(
-        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: {
-            "X-Goog-Upload-Protocol": "resumable",
-            "X-Goog-Upload-Command": "start",
-            "X-Goog-Upload-Header-Content-Length": String(fileBuffer.byteLength),
-            "X-Goog-Upload-Header-Content-Type": mimeType,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ file: { display_name: storagePath } }),
-        }
-      );
-      const uploadUrl = startRes.headers.get("x-goog-upload-url");
-      if (!uploadUrl) throw new Error("Gemini didn't return an upload URL.");
-
-      const uploadRes = await fetch(uploadUrl, {
-        method: "POST",
-        headers: {
-          "Content-Length": String(fileBuffer.byteLength),
-          "X-Goog-Upload-Offset": "0",
-          "X-Goog-Upload-Command": "upload, finalize",
-        },
-        body: fileBuffer,
-      });
-      const uploadedFile = await uploadRes.json();
-      if (uploadedFile.error) throw new Error(uploadedFile.error.message);
-
-      let fileInfo = uploadedFile.file;
-
-      let attempts = 0;
-      while (fileInfo.state === "PROCESSING" && attempts < 30) {
-        await sleep(2000);
-        const checkRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${GEMINI_API_KEY}`
-        );
-        fileInfo = await checkRes.json();
-        attempts++;
-      }
-      if (fileInfo.state !== "ACTIVE") {
-        throw new Error("Gemini is still processing one of the files — try again in a moment.");
-      }
-
-      fileParts.push({ file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri } });
-
-      supabaseAdmin.storage.from("task-uploads").remove([storagePath]).catch(() => {});
-    }
+    // All files are processed at the same time, not one-by-one —
+    // this is what stops 3+ files from timing out.
+    const fileParts = await Promise.all(storagePaths.map(uploadOneFile));
 
     const genRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`,
