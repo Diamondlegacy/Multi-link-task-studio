@@ -94,10 +94,6 @@ async function callModel(taskId, images) {
   return data.result;
 }
 
-/** Calls the Gemini Edge Function — for real audio/video file understanding.
- *  Pass an array of files: [{ storagePath, mimeType }, ...] — one file for
- *  a single upload, multiple files when comparing several at once
- *  (e.g. two videos side by side). */
 async function callGemini(taskId, storagePaths) {
   const { data: sessionData } = await supabaseClient.auth.getSession();
   const token = sessionData?.session?.access_token;
@@ -113,11 +109,22 @@ async function callGemini(taskId, storagePaths) {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return data.result;
+  return data.jobId;
 }
-/** Uploads a file straight to Supabase Storage (handles large files natively,
- *  no size ceiling from stuffing everything into one JSON request). Returns
- *  the storage path to pass into callGemini. */
+async function waitForJob(jobId, onTick) {
+  while (true) {
+    const { data, error } = await supabaseClient
+      .from("jobs")
+      .select("status, result, error")
+      .eq("id", jobId)
+      .single();
+    if (error) throw new Error(error.message);
+    if (onTick) onTick(data.status);
+    if (data.status === "done") return data.result;
+    if (data.status === "error") throw new Error(data.error || "Job failed.");
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
 async function uploadFile(file, onProgress) {
   const user = await getCurrentUser();
   if (!user) throw new Error("Not logged in.");
