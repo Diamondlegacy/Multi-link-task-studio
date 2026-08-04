@@ -76,7 +76,7 @@ async function requireAdmin(redirectTo = "/task-studio/index.html") {
 }
 
 /** Calls your deployed Edge Function, which holds the real AI key */
-async function callModel(prompt, images, model) {
+async function callModel(taskId, images) {
   const { data: sessionData } = await supabaseClient.auth.getSession();
   const token = sessionData?.session?.access_token;
 
@@ -87,7 +87,7 @@ async function callModel(prompt, images, model) {
       Authorization: `Bearer ${token}`,
       apikey: SUPABASE_ANON_KEY,
     },
-    body: JSON.stringify({ prompt, images, model }),
+    body: JSON.stringify({ taskId, images }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
@@ -98,7 +98,7 @@ async function callModel(prompt, images, model) {
  *  Pass an array of files: [{ storagePath, mimeType }, ...] — one file for
  *  a single upload, multiple files when comparing several at once
  *  (e.g. two videos side by side). */
-async function callGemini(prompt, files) {
+async function callGemini(taskId, storagePaths) {
   const { data: sessionData } = await supabaseClient.auth.getSession();
   const token = sessionData?.session?.access_token;
 
@@ -109,7 +109,7 @@ async function callGemini(prompt, files) {
       Authorization: `Bearer ${token}`,
       apikey: SUPABASE_ANON_KEY,
     },
-    body: JSON.stringify({ prompt, files }),
+    body: JSON.stringify({ taskId, storagePaths }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
