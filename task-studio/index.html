@@ -109,135 +109,22 @@ function renderPanel(i){
   `;
   const body = document.getElementById('taskBody');
 
-  if(task.input_type === 'audio'){
-    body.innerHTML = `
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-        <input type="file" id="fileInput" accept="audio/*" multiple>
-        <button class="brand-btn" id="runBtn" disabled>Transcribe</button>
-      </div>
-      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
-    `;
-    setupAudio(task);
-  } else if(task.input_type === 'image'){
-    body.innerHTML = `
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
-        <input type="file" id="fileInput" accept="image/*" multiple>
-        <button class="brand-btn" id="runBtn" disabled>Run</button>
-      </div>
-      <div class="ts-thumbrow" id="thumbRow"></div>
-      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
-    `;
-    setupImage(task);
-  } else if(task.input_type === 'video'){
-    body.innerHTML = `
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-        <input type="file" id="fileInput" accept="video/*" multiple>
-        <button class="brand-btn" id="runBtn" disabled>Evaluate</button>
-      </div>
-      <p style="color:var(--brand-muted);font-size:12px;margin:0 0 10px;">Upload two or more to compare them against each other, or just one to evaluate it alone.</p>
-      <div class="ts-thumbrow" id="videoPreviews"></div>
-      <div class="ts-output empty" id="taskOut">Result will appear here.</div>
-    `;
-    setupVideo(task);
-  } else {
-    body.innerHTML = `<p style="color:var(--brand-muted);">Unknown input type: ${task.input_type}</p>`;
-  }
+  body.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+      <input type="file" id="fileInput" multiple>
+      <button class="brand-btn" id="runBtn" disabled>Run</button>
+    </div>
+    <p style="color:var(--brand-muted);font-size:12px;margin:0 0 10px;">Upload any file(s) this task needs — image, audio, or video. Upload more than one if the task compares multiple files.</p>
+    <div class="ts-thumbrow" id="filePreviews"></div>
+    <div class="ts-output empty" id="taskOut">Result will appear here.</div>
+  `;
+  setupMedia(task);
 }
 
-function setupAudio(task){
+function setupMedia(task){
   const fileInput = document.getElementById('fileInput');
   const runBtn = document.getElementById('runBtn');
-  const out = document.getElementById('taskOut');
-  let selectedFiles = [];
-
-  fileInput.addEventListener('change', ()=>{
-    selectedFiles = Array.from(fileInput.files);
-    runBtn.disabled = selectedFiles.length === 0;
-  });
-
-  runBtn.addEventListener('click', async ()=>{
-    runBtn.disabled = true;
-    runBtn.textContent = "Uploading…";
-    setPipeline(0);
-    out.classList.add('empty');
-    out.textContent = "Uploading files…";
-    try{
-      const paths = [];
-      for(const file of selectedFiles){
-        paths.push(await uploadFile(file));
-      }
-      runBtn.textContent = "Transcribing…";
-      out.textContent = "Working…";
-      setPipeline(1);
-      const result = await callGemini(task.id, paths);
-      setPipeline(2);
-      out.classList.remove('empty');
-      out.innerHTML = '<span class="ts-tag">transcript</span>\n' + result;
-    } catch(err){
-      out.textContent = "Error: " + err.message;
-    } finally {
-      finishPipeline();
-      runBtn.disabled = false;
-      runBtn.textContent = "Transcribe";
-    }
-  });
-}
-
-function setupImage(task){
-  const fileInput = document.getElementById('fileInput');
-  const runBtn = document.getElementById('runBtn');
-  const thumbRow = document.getElementById('thumbRow');
-  const out = document.getElementById('taskOut');
-  let b64List = [];
-
-  fileInput.addEventListener('change', ()=>{
-    const files = Array.from(fileInput.files);
-    if(!files.length) return;
-    b64List = [];
-    thumbRow.innerHTML = '';
-    runBtn.disabled = true;
-
-    let loaded = 0;
-    files.forEach(file=>{
-      const reader = new FileReader();
-      reader.onload = ()=>{
-        b64List.push(reader.result.split(',')[1]);
-        const img = document.createElement('img');
-        img.src = reader.result;
-        thumbRow.appendChild(img);
-        loaded++;
-        if(loaded === files.length) runBtn.disabled = false;
-      };
-      reader.readAsDataURL(file);
-    });
-  });
-
-  runBtn.addEventListener('click', async ()=>{
-    runBtn.disabled = true;
-    runBtn.textContent = "Working…";
-    setPipeline(0);
-    out.classList.add('empty');
-    out.textContent = "Working…";
-    try{
-      setPipeline(1);
-      const result = await callModel(task.id, b64List);
-      setPipeline(2);
-      out.classList.remove('empty');
-      out.innerHTML = '<span class="ts-tag">result</span>\n' + result;
-    } catch(err){
-      out.textContent = "Error: " + err.message;
-    } finally {
-      finishPipeline();
-      runBtn.disabled = false;
-      runBtn.textContent = "Run";
-    }
-  });
-}
-
-function setupVideo(task){
-  const fileInput = document.getElementById('fileInput');
-  const runBtn = document.getElementById('runBtn');
-  const previews = document.getElementById('videoPreviews');
+  const previews = document.getElementById('filePreviews');
   const out = document.getElementById('taskOut');
   let selectedFiles = [];
 
@@ -245,11 +132,22 @@ function setupVideo(task){
     selectedFiles = Array.from(fileInput.files);
     previews.innerHTML = '';
     selectedFiles.forEach(file=>{
-      const v = document.createElement('video');
-      v.src = URL.createObjectURL(file);
-      v.controls = true;
-      v.style.cssText = 'width:160px;height:100px;border-radius:6px;border:1px solid var(--brand-line);object-fit:cover;';
-      previews.appendChild(v);
+      if(file.type.startsWith('image/')){
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        previews.appendChild(img);
+      } else if(file.type.startsWith('video/')){
+        const v = document.createElement('video');
+        v.src = URL.createObjectURL(file);
+        v.controls = true;
+        v.style.cssText = 'width:160px;height:100px;border-radius:6px;border:1px solid var(--brand-line);object-fit:cover;';
+        previews.appendChild(v);
+      } else {
+        const chip = document.createElement('div');
+        chip.textContent = file.name;
+        chip.style.cssText = 'font-size:12px;padding:8px 12px;border:1px solid var(--brand-line);border-radius:6px;background:var(--brand-surface-2);';
+        previews.appendChild(chip);
+      }
     });
     out.classList.add('empty');
     out.textContent = 'Result will appear here.';
@@ -267,23 +165,22 @@ function setupVideo(task){
       for(const file of selectedFiles){
         paths.push(await uploadFile(file));
       }
-      runBtn.textContent = "Evaluating…";
+      runBtn.textContent = "Running…";
       out.textContent = "Working…";
       setPipeline(1);
       const result = await callGemini(task.id, paths);
       setPipeline(2);
       out.classList.remove('empty');
-      out.innerHTML = '<span class="ts-tag">evaluation</span>\n' + result;
+      out.innerHTML = '<span class="ts-tag">result</span>\n' + result;
     } catch(err){
       out.textContent = "Error: " + err.message;
     } finally {
       finishPipeline();
       runBtn.disabled = false;
-      runBtn.textContent = "Evaluate";
+      runBtn.textContent = "Run";
     }
   });
 }
-
 init();
 </script>
 </body>
