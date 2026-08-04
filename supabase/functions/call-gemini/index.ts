@@ -23,19 +23,28 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, files } = await req.json();
-    if (!files || !files.length) throw new Error("No files were sent.");
+    const { taskId, storagePaths } = await req.json();
+    if (!taskId) throw new Error("No task specified.");
+    if (!storagePaths || !storagePaths.length) throw new Error("No files were sent.");
+
+    const { data: task, error: taskError } = await supabaseAdmin
+      .from("tasks")
+      .select("prompt")
+      .eq("id", taskId)
+      .single();
+    if (taskError || !task) throw new Error("Unknown task.");
 
     const fileParts = [];
 
-    for (const f of files) {
+    for (const storagePath of storagePaths) {
       const { data: fileBlob, error: dlError } = await supabaseAdmin
         .storage
         .from("task-uploads")
-        .download(f.storagePath);
+        .download(storagePath);
       if (dlError) throw new Error("Couldn't read uploaded file: " + dlError.message);
 
       const fileBuffer = new Uint8Array(await fileBlob.arrayBuffer());
+      const mimeType = fileBlob.type || "application/octet-stream";
 
       const startRes = await fetch(
         `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
@@ -45,10 +54,10 @@ serve(async (req) => {
             "X-Goog-Upload-Protocol": "resumable",
             "X-Goog-Upload-Command": "start",
             "X-Goog-Upload-Header-Content-Length": String(fileBuffer.byteLength),
-            "X-Goog-Upload-Header-Content-Type": f.mimeType,
+            "X-Goog-Upload-Header-Content-Type": mimeType,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ file: { display_name: f.storagePath } }),
+          body: JSON.stringify({ file: { display_name: storagePath } }),
         }
       );
       const uploadUrl = startRes.headers.get("x-goog-upload-url");
@@ -83,7 +92,7 @@ serve(async (req) => {
 
       fileParts.push({ file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri } });
 
-      supabaseAdmin.storage.from("task-uploads").remove([f.storagePath]).catch(() => {});
+      supabaseAdmin.storage.from("task-uploads").remove([storagePath]).catch(() => {});
     }
 
     const genRes = await fetch(
@@ -92,7 +101,7 @@ serve(async (req) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [...fileParts, { text: prompt }] }],
+          contents: [{ parts: [...fileParts, { text: task.prompt }] }],
         }),
       }
     );
