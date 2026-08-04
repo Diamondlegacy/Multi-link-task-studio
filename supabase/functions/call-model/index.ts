@@ -2,8 +2,9 @@
 // call-model — Supabase Edge Function
 //
 // This is the ONLY place your real Anthropic API key lives.
-// The browser never sees it — it calls this function instead,
-// and this function calls Anthropic on its behalf.
+// The browser never sees it, and never sees the prompt either —
+// it sends a taskId, and this function looks the real prompt up
+// server-side, admin or not.
 //
 // DEPLOY (from your project folder, once you have the Supabase CLI):
 //   supabase functions deploy call-model
@@ -11,11 +12,15 @@
 // ==============================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 serve(async (req) => {
-  // Allow browser calls from your site
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -26,7 +31,15 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, images, model } = await req.json();
+    const { taskId, images } = await req.json();
+    if (!taskId) throw new Error("No task specified.");
+
+    const { data: task, error: taskError } = await supabaseAdmin
+      .from("tasks")
+      .select("prompt, model")
+      .eq("id", taskId)
+      .single();
+    if (taskError || !task) throw new Error("Unknown task.");
 
     const content = [];
     if (images && images.length) {
@@ -37,7 +50,7 @@ serve(async (req) => {
         });
       }
     }
-    content.push({ type: "text", text: prompt });
+    content.push({ type: "text", text: task.prompt });
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -47,7 +60,7 @@ serve(async (req) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: model || "claude-sonnet-4-6",
+        model: task.model || "claude-sonnet-4-6",
         max_tokens: 1000,
         messages: [{ role: "user", content }],
       }),
